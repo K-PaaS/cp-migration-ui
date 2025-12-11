@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layouts/layout}">
+<div layout:fragment="content">
+    <div id="content" class="sub-page">
+        <!--<article class="location">
+        </article>-->
+        <article class="base detail">
+            <div class="notice">
+                <h4>Details</h4>
+                <div class="table_style01">
+                    <table>
+                        <caption>Details</caption>
+                        <colgroup >
+                            <col width="20%" />
+                            <col width="80%" />
+                        </colgroup>
+                        <tbody class="listTable">
+                        <tr>
+                            <th scope="row" class="left">Name</th>
+                            <td class="left" id="name">
+                                <div id="editValueName" style="outline:none" disabled="true"></div>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row" class="left">Storage Type</th>
+                            <td class="left" id="storageType"></td>
+                        </tr>
+                        <tr>
+                            <th scope="row" class="left">Endpoint</th>
+                            <td class="left" id="endpoint"></td>
+                        </tr>
+                        <tr>
+                            <th scope="row" class="left">Access Key Id</th>
+                            <td class="box left" id="accessKeyId"></td>
+                        </tr>
+                        <tr>
+                            <th scope="row" class="left">Secret Access Key</th>
+                            <td class="left box" id="secretAccessKey"></td>
+                        </tr>
+                        <tr>
+                            <th scope="row" class="left">Created Time</th>
+                            <td class="left box" id="createdTime"></td>
+                        </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <!-- btn -->
+            <div class="btn02">
+                <button onclick="movePage(func.cpMigrationUiUri + URI_CP_ACCOUNTS_LIST)" th:text="#{M0025}"></button>
+                <div>
+                    <a href="javascript:;" id="delete" th:text="#{M0024}"></a>
+                </div>
+            </div>
+        </article>
+    </div>
+</div>
+
+<th:block layout:fragment="script">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/3.1.2/rollups/hmac-sha256.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/3.1.2/components/enc-base64-min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsrsasign/10.2.0/jsrsasign-all-min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.js"></script>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.0.0/crypto-js.min.js"></script>
+    <script type="text/javascript">
+        window.onload = () => {
+
+            const accountsDetail = {
+                init() {
+
+                    func.loadMigData('GET', `${func.vaultUrl}v1/vault/storage/${sessionStorage.getItem('userGuid')}/${sessionStorage.getItem('accountsName')}`, 'application/json', accountsDetail.draw);
+                },
+
+                async draw(data) {
+
+                    let type = 'vault';
+                    let decodeData = await func.responseDecodeData(data, type)
+                    let encodedData = JSON.stringify(decodeData.data)
+                    encodedData = encodedData.replaceAll("\"", "");
+
+                    let iv = decodeData.iv
+                    let aes = decodeData.aes
+                    let responseDecodeData = await responseDecodeDataWithAes(encodedData, aes, iv)
+                    let decodedData = JSON.parse(responseDecodeData)
+
+                    document.getElementById('name').innerText = sessionStorage.getItem('accountsName');
+                    document.getElementById('storageType').innerText = decodedData.data.data.storageType;
+                    document.getElementById('endpoint').innerText = decodedData.data.data.endpoint;
+                    document.getElementById('accessKeyId').innerText = decodedData.data.data.accessKeyId.replaceAll(/./gi, "*");
+                    document.getElementById('secretAccessKey').innerText = decodedData.data.data.secretAccessKey.replaceAll(/./gi, "*");
+
+                    let originTime = decodedData.data.metadata.created_time;
+                    let kstTime = '';
+                    try {
+                        const date = new Date(originTime);
+
+                        const options = {
+                            timeZone: 'Asia/Seoul',
+                            year: 'numeric',
+                            month: '2-digit',
+                            day: '2-digit',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            second: '2-digit',
+                            hour12: false
+                        };
+
+                        kstTime = date.toLocaleString('en-CA', options).replace(',', '');
+
+                    } catch (e) {
+                        console.error("KST time conversion failed:", e);
+                        let createdTime1 = originTime.substr(0, 10);
+                        let createdTime2 = originTime.substr(11, 8);
+                        kstTime = createdTime1 + " " + createdTime2;
+                    }
+
+                    document.getElementById('createdTime').innerText = kstTime;
+                },
+
+                event(){
+                    document.getElementById('delete').addEventListener('click', (e) => {
+                        func.alertMigPopup('DELETE', MSG_CHECK_TO_DELETE, true, MSG_CONFIRM, accountsDetail.delete);
+                    }, false);
+
+                    document.addEventListener('click', (e) => {
+                        if (e.target && e.target.id === 'editValueBtnName') {
+                            document.getElementById('editValueName').setAttribute("contenteditable", true);
+                            document.getElementById('editValueName').setAttribute("disabled", false);
+                        }
+                    });
+
+                },
+
+                delete(){
+
+                    if (sessionStorage.getItem('accountsCnt') === '1') {
+                        sessionStorage.setItem('accountsCnt', '0')
+                        func.deleteMigData('DELETE', `${func.vaultUrl}v1/vault/storage/${sessionStorage.getItem('userGuid')}/${sessionStorage.getItem('accountsName')}`, 'application/json', movePage(func.cpMigrationUiUri + URI_CP_BASE_URL));
+                        sessionStorage.removeItem('accountsData')
+                    } else {
+                        func.deleteMigData('DELETE', `${func.vaultUrl}v1/vault/storage/${sessionStorage.getItem('userGuid')}/${sessionStorage.getItem('accountsName')}`, 'application/json', func.migHistoryBackRefresh);
+                    }
+                },
+
+            }
+            accountsDetail.init();
+            accountsDetail.event();
+        }
+
+        async function responseDecodeDataWithAes(data, aes, iv) {
+
+            try {
+                return CryptoJS.AES.decrypt(data.toString(), CryptoJS.enc.Hex.parse(aes),
+                    { iv: CryptoJS.enc.Hex.parse(iv),
+                        padding: CryptoJS.pad.Pkcs7,
+                        mode: CryptoJS.mode.CBC
+                    }).toString(CryptoJS.enc.Utf8);
+            } catch (error) {
+                console.log("Decrypt Error")
+            }
+
+        }
+
+
+    </script>
+</th:block>
+</html>

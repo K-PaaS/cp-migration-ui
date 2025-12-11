@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layouts/layout}">
+<div layout:fragment="content">
+    <div id="content" class="sub-page clusters">
+        <!--<article class="location">
+        </article>-->
+        <article class="base tab-cont-wrap">
+            <ul class="tab-btn">
+                <li type="notice-accounts" id="tab-accounts"><a onclick="movePage(func.cpMigrationUiUri + URI_CP_ACCOUNTS_LIST)">Accounts</a></li>
+                <li type="notice-migrations" id="tab-migrations" class="active"><a href="javascript:">Migrations</a></li>
+            </ul>
+            <div class="creat" style="overflow: auto; display: flex; justify-content: space-between;" >
+<!--                <h3 th:text="|Migrations #{M0022}|"></h3>-->
+                <div class="source" style="float: left;width: 47%;">
+                    <h3 th:text="Source"></h3>
+                    <dl>
+                        <dt><label for="sourceMigration">Name</label></dt>
+                        <dd>
+                            <fieldset>
+                                <select id="sourceMigration" onchange="changeSourceMigrationSelect()">
+                                    <option style="color:#959ba5;" value="" disabled selected>Migration</option>
+                                </select>
+                            </fieldset>
+                        </dd>
+                    </dl>
+                    <dl>
+                        <dt><label for="sourceBucket">Bucket</label></dt>
+                        <dd>
+                            <fieldset>
+                                <select id="sourceBucket">
+                                    <option style="color:#959ba5;" value="" disabled selected>Bucket</option>
+                                </select>
+                            </fieldset>
+                        </dd>
+                    </dl>
+                </div>
+                <div class="destination" style="float: left;width: 47%;">
+                    <h3 th:text="Destination"></h3>
+                    <dl>
+                        <dt><label for="destinationMigration">Name</label></dt>
+                        <dd>
+                            <fieldset>
+                                <select id="destinationMigration" onchange="changeDestinationMigrationSelect()">
+                                    <option style="color:#959ba5;" value="" disabled selected>Migration</option>
+                                </select>
+                            </fieldset>
+                        </dd>
+                    </dl>
+                    <dl>
+                        <dt><label for="destinationBucket">Bucket</label></dt>
+                        <dd>
+                            <fieldset>
+                                <select id="destinationBucket">
+                                    <option style="color:#959ba5;" value="" disabled selected>Bucket</option>
+                                </select>
+                            </fieldset>
+                        </dd>
+                    </dl>
+                </div>
+            </div>
+            <!-- btn -->
+            <div class="btn02" style="margin-top: 0">
+                <div>
+                    <button type="submit" id="sync" style="margin-right:6px;" th:text="#{M0027}"></button>
+                </div>
+                <div>
+                    <button type="submit" id="copy" style="margin-right:6px;" th:text="#{M0028}"></button>
+                </div>
+            </div>
+        </article>
+    </div>
+</div>
+
+<th:block layout:fragment="script">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/3.1.2/rollups/hmac-sha256.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/3.1.2/components/enc-base64-min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsrsasign/10.2.0/jsrsasign-all-min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.js"></script>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.0.0/crypto-js.min.js"></script>
+    <script type="text/javascript" th:inline="javascript">
+        window.onload = () => {
+            const migrationsCreate = {
+
+                init() {
+
+                    func.loadMigData('GET', `${func.vaultUrl}v1/vault/storage/${sessionStorage.getItem('userGuid')}?detail=false`, 'application/json', migrationsCreate.draw);
+
+                    sessionStorage.setItem('accountsName' , '-');
+                },
+
+                draw(data) {
+                    data = JSON.parse(data)
+
+                    if (!data || !data.keys || data.keys.length === 0) {
+                        func.alertMigPopup('ALERT', MSG_CHECK_TO_REGISTER_ACCOUNT, true, MSG_CONFIRM, function() {
+                            movePage(func.cpMigrationUiUri + URI_CP_ACCOUNTS_LIST);
+                        });
+                        return;
+                    }
+
+                    func.migRemoveHtml(document.querySelector('#sourceMigration'));
+                    func.migRemoveHtml(document.querySelector('#destinationMigration'));
+
+                    let sourceMigrationHtml = `<option style="color:#959ba5;" value="" disabled selected>Migration</option>`;
+                    let destinationMigrationHtml = `<option style="color:#959ba5;" value="" disabled selected>Migration</option>`;
+
+                    for (let key of data.keys) {
+                        sourceMigrationHtml += `<option value="${key}">${key}</option>`;
+                    }
+
+                    for (let key of data.keys) {
+                        destinationMigrationHtml += `<option value="${key}">${key}</option>`;
+                    }
+
+                    func.migAppendHtml(document.getElementById('sourceMigration'), sourceMigrationHtml);
+                    func.migAppendHtml(document.getElementById('destinationMigration'), destinationMigrationHtml);
+                },
+
+                event() {
+
+                    document.getElementById('sync').addEventListener('click', (e) => {
+
+                        let sourceMigration = document.querySelector('#sourceMigration');
+                        let sourceBucket = document.querySelector('#sourceBucket');
+                        let destinationMigration = document.querySelector('#destinationMigration');
+                        let destinationBucket = document.querySelector('#destinationBucket');
+
+                        if (sessionStorage.getItem('accountsData') === 'N') {
+                            func.alertMigPopup('ALERT', MSG_CHECK_TO_REGISTER_ACCOUNT, true, MSG_CONFIRM, "closed");
+                        } else if(sourceBucket.value === "") {
+                            func.alertMigPopup('ALERT', MSG_CHECK_TO_SELECT_BOX, true, MSG_CONFIRM, "closed");
+                        } else if (destinationBucket.value === "") {
+                            func.alertMigPopup('ALERT', MSG_CHECK_TO_SELECT_BOX, true, MSG_CONFIRM, "closed");
+                        } else if (sourceBucket.value === "" && destinationBucket.value === "") {
+                            func.alertMigPopup('ALERT', MSG_CHECK_TO_SELECT_BOX, true, MSG_CONFIRM, "closed");
+                        } else if (sourceMigration.value !== 0 && destinationMigration.value !== 0 && sourceBucket.value !== 0 && destinationBucket.value !== 0) {
+                            func.alertMigPopup('SYNC', MSG_CHECK_TO_SYNC, true, MSG_CONFIRM, migrationsCreate.sync);
+                        }
+
+                    }, false);
+
+                    document.getElementById('copy').addEventListener('click', (e) => {
+
+                        let sourceMigration = document.querySelector('#sourceMigration');
+                        let sourceBucket = document.querySelector('#sourceBucket');
+                        let destinationMigration = document.querySelector('#destinationMigration');
+                        let destinationBucket = document.querySelector('#destinationBucket');
+
+                        if (sessionStorage.getItem('accountsData') === 'N') {
+                            func.alertMigPopup('ALERT', MSG_CHECK_TO_REGISTER_ACCOUNT, true, MSG_CONFIRM, "closed");
+                        } else if(sourceBucket.value === "") {
+                            func.alertMigPopup('ALERT', MSG_CHECK_TO_SELECT_BOX, true, MSG_CONFIRM, "closed");
+                        } else if (destinationBucket.value === "") {
+                            func.alertMigPopup('ALERT', MSG_CHECK_TO_SELECT_BOX, true, MSG_CONFIRM, "closed");
+                        } else if (sourceBucket.value === "" && destinationBucket.value === "") {
+                            func.alertMigPopup('ALERT', MSG_CHECK_TO_SELECT_BOX, true, MSG_CONFIRM, "closed");
+                        } else if (sourceMigration.value !== 0 && destinationMigration.value !== 0 && sourceBucket.value !== 0 && destinationBucket.value !== 0) {
+                            func.alertMigPopup('COPY', MSG_CHECK_TO_COPY, true, MSG_CONFIRM, migrationsCreate.copy);
+                        }
+
+                    }, false);
+                },
+
+                async sync() {
+
+                    let sourceEndpoint = '';
+                    let sourceAccessKeyId = '';
+                    let sourceSecretAccessKey = '';
+                    let sourceBucket = document.querySelector('#sourceBucket > option:checked').innerHTML;
+
+                    let destinationEndpoint = '';
+                    let destinationAccessKeyId = '';
+                    let destinationSecretAccessKey = '';
+                    let destinationBucket = document.querySelector('#destinationBucket > option:checked').innerHTML;
+
+                    let sourceData = sessionStorage.getItem('sourceData');
+                    let destinationData = sessionStorage.getItem('destinationData');
+
+                    let encodeType = 'mig';
+
+                    let decodeSourceData = await func.decodeRsaWebCryptoAPI(sourceData, encodeType)
+                    let decodeDestinationData = await func.decodeRsaWebCryptoAPI(destinationData, encodeType)
+
+                    decodeSourceData = JSON.parse(decodeSourceData)
+                    decodeDestinationData = JSON.parse(decodeDestinationData)
+
+                    sourceEndpoint = decodeSourceData.sourceEndpoint;
+                    sourceAccessKeyId = decodeSourceData.sourceAccessKeyId;
+                    sourceSecretAccessKey = decodeSourceData.sourceSecretAccessKey;
+
+                    destinationEndpoint = decodeDestinationData.destinationEndpoint;
+                    destinationAccessKeyId = decodeDestinationData.destinationAccessKeyId;
+                    destinationSecretAccessKey = decodeDestinationData.destinationSecretAccessKey;
+
+                    let migrationsCreate = {"dst":{"accessKeyId":destinationAccessKeyId,"bucket":destinationBucket,"endpoint":destinationEndpoint,"secretAccessKey":destinationSecretAccessKey,"storageType":"s3"},"src":{"accessKeyId":sourceAccessKeyId,"bucket":sourceBucket,"endpoint":sourceEndpoint,"secretAccessKey":sourceSecretAccessKey,"storageType":"s3"}}
+                    let timestamp = func.createUnixTimestamp();
+                    let includeTimestampData = {"data": migrationsCreate, "timestamp": timestamp.toString()}
+                    let hmacData = func.encodeHmacSha256(JSON.stringify(includeTimestampData), encodeType);
+                    let includeHmacData = {"data":migrationsCreate,"hmac_data":hmacData,"timestamp":timestamp.toString()}
+                    let aesIV = func.generateAesIv();
+
+                    let encodeDataWithAes = func.encodeDataWithAes(JSON.stringify(includeHmacData), aesIV.aes, aesIV.iv);
+                    const encodeRsaAes = await func.encodeRsaWebCryptoAPI(aesIV.aes, encodeType)
+                    const encodeIvBase64 = func.encodeIvBase64(aesIV.iv)
+
+                    let encodeData = {"key":encodeRsaAes,"iv":encodeIvBase64,"data":encodeDataWithAes}
+
+                    func.saveMigData('POST', `${func.migrationUrl}v1/migration/sync/sync`, JSON.stringify(encodeData), true, 'application/json', func.migHistoryBackRefresh);
+
+                    sessionStorage.removeItem('sourceData')
+                    sessionStorage.removeItem('destinationData')
+                },
+                async copy() {
+
+                    let sourceEndpoint = '';
+                    let sourceAccessKeyId = '';
+                    let sourceSecretAccessKey = '';
+                    let sourceBucket = document.querySelector('#sourceBucket > option:checked').innerHTML;
+
+                    let destinationEndpoint = '';
+                    let destinationAccessKeyId = '';
+                    let destinationSecretAccessKey = '';
+                    let destinationBucket = document.querySelector('#destinationBucket > option:checked').innerHTML;
+
+                    let sourceData = sessionStorage.getItem('sourceData');
+                    let destinationData = sessionStorage.getItem('destinationData');
+
+                    let encodeType = 'mig';
+
+                    let decodeSourceData = await func.decodeRsaWebCryptoAPI(sourceData, encodeType)
+                    let decodeDestinationData = await func.decodeRsaWebCryptoAPI(destinationData, encodeType)
+
+                    decodeSourceData = JSON.parse(decodeSourceData)
+                    decodeDestinationData = JSON.parse(decodeDestinationData)
+
+                    sourceEndpoint = decodeSourceData.sourceEndpoint;
+                    sourceAccessKeyId = decodeSourceData.sourceAccessKeyId;
+                    sourceSecretAccessKey = decodeSourceData.sourceSecretAccessKey;
+
+                    destinationEndpoint = decodeDestinationData.destinationEndpoint;
+                    destinationAccessKeyId = decodeDestinationData.destinationAccessKeyId;
+                    destinationSecretAccessKey = decodeDestinationData.destinationSecretAccessKey;
+
+                    let migrationsCreate = {"dst":{"accessKeyId":destinationAccessKeyId,"bucket":destinationBucket,"endpoint":destinationEndpoint,"secretAccessKey":destinationSecretAccessKey,"storageType":"s3"},"src":{"accessKeyId":sourceAccessKeyId,"bucket":sourceBucket,"endpoint":sourceEndpoint,"secretAccessKey":sourceSecretAccessKey,"storageType":"s3"}}
+                    let timestamp = func.createUnixTimestamp();
+                    let includeTimestampData = {"data": migrationsCreate, "timestamp": timestamp.toString()}
+                    let hmacData = func.encodeHmacSha256(JSON.stringify(includeTimestampData), encodeType);
+                    let includeHmacData = {"data":migrationsCreate,"hmac_data":hmacData,"timestamp":timestamp.toString()}
+                    let aesIV = func.generateAesIv();
+
+                    let encodeDataWithAes = func.encodeDataWithAes(JSON.stringify(includeHmacData), aesIV.aes, aesIV.iv);
+                    const encodeRsaAes = await func.encodeRsaWebCryptoAPI(aesIV.aes, encodeType)
+                    const encodeIvBase64 = func.encodeIvBase64(aesIV.iv)
+
+                    let encodeData = {"key":encodeRsaAes,"iv":encodeIvBase64,"data":encodeDataWithAes}
+
+                    func.saveMigData('POST', `${func.migrationUrl}v1/migration/sync/copy`, JSON.stringify(encodeData), true, 'application/json', func.migHistoryBackRefresh);
+
+                    sessionStorage.removeItem('sourceData')
+                    sessionStorage.removeItem('destinationData')
+                }
+            };
+            migrationsCreate.init();
+            migrationsCreate.event();
+        }
+
+        function changeSourceMigrationSelect() {
+            let sourceMigration = document.querySelector('#sourceMigration > option:checked').innerHTML;
+            let storageType = ``;
+            let endpoint = ``;
+            let accessKeyId = ``;
+            let secretAccessKey = ``;
+
+            func.loadMigData('GET', `${func.vaultUrl}v1/vault/storage/${sessionStorage.getItem('userGuid')}/${sourceMigration}`, 'application/json', func.sourceDetailDraw);
+            func.loadMigData('GET', `${func.vaultUrl}v1/vault/storage/${sessionStorage.getItem('userGuid')}/${document.querySelector('#sourceMigration > option:checked').value}`, 'application/json', sourceAccountsDraw);
+
+            async function sourceAccountsDraw(data) {
+
+                let decodeType = 'vault';
+                let encodeType = 'mig';
+
+                let decodeData = await func.responseDecodeData(data, decodeType)
+                let encodedData = JSON.stringify(decodeData.data)
+                encodedData = encodedData.replaceAll("\"", "");
+
+                let iv = decodeData.iv
+                let aes = decodeData.aes
+                let responseDecodeData = await responseDecodeDataWithAes(encodedData, aes, iv)
+                let decodedData = JSON.parse(responseDecodeData)
+
+                storageType = decodedData.data.data.storageType;
+                endpoint = decodedData.data.data.endpoint;
+                accessKeyId = decodedData.data.data.accessKeyId;
+                secretAccessKey = decodedData.data.data.secretAccessKey;
+
+                let timestamp = func.createUnixTimestamp();
+                let bucketsData = {"accessKeyId":accessKeyId,"bucket":"","endpoint":endpoint,"secretAccessKey":secretAccessKey,"storageType":storageType}
+                let includeTimestampData = {"data":bucketsData,"timestamp":timestamp.toString()}
+                let hmacData = func.encodeHmacSha256(JSON.stringify(includeTimestampData), encodeType);
+                let includeHmacData = {"data":bucketsData,"hmac_data":hmacData,"timestamp":timestamp.toString()}
+                let aesIV = func.generateAesIv();
+
+                let encodeDataWithAes = func.encodeDataWithAes(JSON.stringify(includeHmacData), aesIV.aes, aesIV.iv);
+                const encodeRsaAes = await func.encodeRsaWebCryptoAPI(aesIV.aes, encodeType)
+                const encodeIvBase64 = func.encodeIvBase64(aesIV.iv)
+
+                let encodeData = {
+                    "key": encodeRsaAes,
+                    "iv": encodeIvBase64,
+                    "data": encodeDataWithAes
+                }
+
+                func.bucketMigData('POST', `${func.migrationUrl}v1/migration/operations/list`, JSON.stringify(encodeData), true, 'application/json', sourceBucketsDraw);
+            }
+
+            function sourceBucketsDraw(data) {
+                func.migRemoveHtml(document.querySelector('#sourceBucket'));
+
+                data = data.substr(10);
+                data = data.slice(0, -2);
+                let arrData = data.split('Size');
+                arrData.pop();
+
+                for (var i=0; i<=arrData.length-1; i++) {
+                    arrData[i] = arrData[i].substring(arrData[i].indexOf(`Name:`) + 5,arrData[i].indexOf(` Path`) );
+                }
+
+                let sourceBucketHtml = `<option value="" disabled selected>Bucket</option>`;
+
+                for(var i=0; i<=arrData.length-1; i++){
+                    sourceBucketHtml += `<option value="${arrData[i]}">${arrData[i]}</option>`;
+                }
+
+                func.migAppendHtml(document.getElementById('sourceBucket'), sourceBucketHtml);
+
+            }
+
+        }
+        function changeDestinationMigrationSelect() {
+            let destinationMigration = document.querySelector('#destinationMigration > option:checked').innerHTML;
+            let storageType = ``;
+            let endpoint = ``;
+            let accessKeyId = ``;
+            let secretAccessKey = ``;
+
+            func.loadMigData('GET', `${func.vaultUrl}v1/vault/storage/${sessionStorage.getItem('userGuid')}/${destinationMigration}`, 'application/json', func.destinationDetailDraw);
+            func.loadMigData('GET', `${func.vaultUrl}v1/vault/storage/${sessionStorage.getItem('userGuid')}/${document.querySelector('#destinationMigration > option:checked').value}`, 'application/json', destinationAccountsDraw);
+
+            async function destinationAccountsDraw(data) {
+
+                let decodeType = 'vault';
+                let encodeType = 'mig';
+
+                let decodeData = await func.responseDecodeData(data, decodeType)
+                let encodedData = JSON.stringify(decodeData.data)
+                encodedData = encodedData.replaceAll("\"", "");
+
+                let iv = decodeData.iv
+                let aes = decodeData.aes
+                let responseDecodeData = await responseDecodeDataWithAes(encodedData, aes, iv)
+                let decodedData = JSON.parse(responseDecodeData)
+
+                storageType = decodedData.data.data.storageType;
+                endpoint = decodedData.data.data.endpoint;
+                accessKeyId = decodedData.data.data.accessKeyId;
+                secretAccessKey = decodedData.data.data.secretAccessKey;
+
+                let timestamp = func.createUnixTimestamp();
+                let bucketsData = {"accessKeyId":accessKeyId,"bucket":"","endpoint":endpoint,"secretAccessKey":secretAccessKey,"storageType":storageType}
+                let includeTimestampData = {"data":bucketsData,"timestamp":timestamp.toString()}
+                let hmacData = func.encodeHmacSha256(JSON.stringify(includeTimestampData), encodeType);
+                let includeHmacData = {"data":bucketsData,"hmac_data":hmacData,"timestamp":timestamp.toString()}
+                let aesIV = func.generateAesIv();
+
+                let encodeDataWithAes = func.encodeDataWithAes(JSON.stringify(includeHmacData), aesIV.aes, aesIV.iv);
+                const encodeRsaAes = await func.encodeRsaWebCryptoAPI(aesIV.aes, encodeType)
+                const encodeIvBase64 = func.encodeIvBase64(aesIV.iv)
+
+                let encodeData = {
+                    "key": encodeRsaAes,
+                    "iv": encodeIvBase64,
+                    "data": encodeDataWithAes
+                }
+
+                func.bucketMigData('POST', `${func.migrationUrl}v1/migration/operations/list`, JSON.stringify(encodeData), true, 'application/json', destinationBucketsDraw);
+            }
+
+            function destinationBucketsDraw(data) {
+                func.migRemoveHtml(document.querySelector('#destinationBucket'));
+
+                data = data.substr(10);
+                data = data.slice(0, -2);
+                let arrData = data.split('Size');
+                arrData.pop();
+
+                for (var i=0; i<=arrData.length-1; i++) {
+                    arrData[i] = arrData[i].substring(arrData[i].indexOf(`Name:`) + 5,arrData[i].indexOf(` Path`) );
+                }
+
+                let destinationBucketHtml = `<option value="" disabled selected>Bucket</option>`;
+
+                for(var i=0; i<=arrData.length-1; i++){
+                    destinationBucketHtml += `<option value="${arrData[i]}">${arrData[i]}</option>`;
+                }
+
+                func.migAppendHtml(document.getElementById('destinationBucket'), destinationBucketHtml);
+
+            }
+        }
+
+        async function responseDecodeDataWithAes(data, aes, iv) {
+
+            try {
+                return CryptoJS.AES.decrypt(data.toString(), CryptoJS.enc.Hex.parse(aes),
+                    { iv: CryptoJS.enc.Hex.parse(iv),
+                        padding: CryptoJS.pad.Pkcs7,
+                        mode: CryptoJS.mode.CBC
+                    }).toString(CryptoJS.enc.Utf8);
+            } catch (error) {
+                console.log("Decrypt Error")
+            }
+        }
+
+    </script>
+</th:block>
+</html>

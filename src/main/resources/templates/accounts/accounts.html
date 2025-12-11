@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layouts/layout}">
+
+<div layout:fragment="content">
+    <div id="content" class="sub-page">
+        <article class="base tab-cont-wrap">
+            <ul class="tab-btn">
+                <li type="notice-accounts" id="tab-accounts" class="active"><a href="javascript:">Accounts</a></li>
+                <li type="notice-migrations" id="tab-migrations"><a
+                        onclick="movePage(func.cpMigrationUiUri + URI_CP_MIGRATIONS_CREATE)">Migrations</a></li>
+            </ul>
+            <div class="notice tab-cont-wrap">
+                <h3>List</h3>
+                <div class="table_style01">
+                    <table>
+                        <caption>Accounts List</caption>
+                        <colgroup>
+                            <col width="20%"/>
+                            <col width="10%"/>
+                            <col width="40%"/>
+                            <col width="30%"/>
+                        </colgroup>
+                        <thead>
+                        <tr>
+                            <th scope="col">Name</th>
+                            <th scope="col">Storage Type</th>
+                            <th scope="col">Endpoint</th>
+                            <th scope="col">Created Time</th>
+                        </tr>
+                        </thead>
+                        <tbody class="listTable">
+                        </tbody>
+                    </table>
+                    <a class="more" href="javascript:;">more</a>
+                </div>
+                <a href="javascript:;" class="create" th:text="#{M0022}"></a>
+            </div>
+        </article>
+    </div>
+</div>
+<th:block layout:fragment="script">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/3.1.2/rollups/hmac-sha256.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/3.1.2/components/enc-base64-min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsrsasign/10.2.0/jsrsasign-all-min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.js"></script>
+    <script type="text/javascript"
+            src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.0.0/crypto-js.min.js"></script>
+
+    <script type="text/javascript" th:inline="javascript">
+        let serverAccessToken = /*[[${accessToken}]]*/ '';
+        let serverUserGuid = /*[[${userGuid}]]*/ '';
+        const myLang = /*[[${lang}]]*/ 'ko';
+    </script>
+
+    <script type="text/javascript" th:inline="javascript">
+        window.onload = () => {
+
+            window.addEventListener("message", (event) => {
+                if (event.origin !== window.location.origin) return;
+                const data = event.data;
+
+                if (data && data.type === "PORTAL_AUTH_DATA") {
+                    if (data.language && data.language !== myLang) {
+
+                        const currentUrlParams = new URLSearchParams(window.location.search);
+                        if (currentUrlParams.get('lang') === data.language) {
+                        } else {
+                            var reqUrl = func.cpMigrationUiUri + "/localeLanguage?language=" + data.language;
+                            var request = new XMLHttpRequest();
+                            request.open('PUT', reqUrl, true);
+                            request.setRequestHeader('Content-type', 'application/json');
+
+                            request.onreadystatechange = () => {
+                                if (request.readyState === XMLHttpRequest.DONE) {
+                                    const currentUrl = new URL(window.location.href);
+                                    currentUrl.searchParams.set('lang', data.language);
+                                    window.location.href = currentUrl.toString();
+                                }
+                            };
+                            request.send();
+
+                            return;
+                        }
+                    }
+
+                    let token = data.accessToken;
+
+                    if (token) {
+                        token = token.replaceAll('"', '').trim();
+                        if (!token.startsWith('Bearer ')) {
+                            token = 'Bearer ' + token;
+                        }
+                    }
+
+                    sessionStorage.setItem('accessToken', token);
+                    if (data.userGuid) sessionStorage.setItem('userGuid', data.userGuid);
+
+                    startApplication();
+                }
+            });
+
+            if (serverAccessToken && serverUserGuid) {
+                sessionStorage.setItem('accessToken', 'Bearer ' + serverAccessToken.replaceAll('"', ''));
+                sessionStorage.setItem('userGuid', serverUserGuid);
+                startApplication();
+            } else {
+                if (window.self !== window.top) {
+                    window.parent.postMessage({type: "MIGRATION_UI_READY"}, window.location.origin);
+                }
+                else {
+                    location.href = '/cpmigui/oauth2/authorization/keycloak';
+                }
+            }
+        };
+
+        function startApplication() {
+            if (!sessionStorage.getItem('accessToken')) {
+                return;
+            }
+            sessionStorage.setItem('accountsCnt', '0');
+            sessionStorage.setItem('accountsName', '-');
+            accounts.init();
+            accounts.event();
+        }
+
+
+        const accounts = {
+            limit: 10,
+            allItemCount: 0,
+            allAccountsData: [],
+
+            init() {
+                const token = sessionStorage.getItem('accessToken');
+                const uid = sessionStorage.getItem('userGuid');
+
+                if (!token) {
+                    return;
+                }
+
+                sessionStorage.removeItem('sourceData');
+                sessionStorage.removeItem('destinationData');
+                sessionStorage.setItem('accountsName', '-');
+
+                func.loading();
+
+                if (uid && uid !== 'null' && uid !== 'undefined') {
+                    const baseUrl = func.vaultUrl;
+                    const finalUrl = `${baseUrl}v1/vault/storage/${uid}?detail=true`;
+
+                    func.loadMigData('GET', finalUrl, 'application/json', accounts.draw);
+                } else {
+                    accounts.handleNoData("User ID Error");
+                    accounts.listEvent();
+                }
+            },
+
+            async draw(data) {
+                let decodedData = {data: []};
+
+                try {
+                    if (data && data !== 'undefined') {
+                        let type = 'vault';
+                        let decodeData = await func.responseDecodeData(data, type);
+
+                        if (!decodeData || !decodeData.data) {
+                            throw new Error("Invalid Decode Data from API response.");
+                        }
+
+                        let encodedData = JSON.stringify(decodeData.data).replaceAll("\"", "");
+                        let iv = decodeData.iv;
+                        let aes = decodeData.aes;
+                        let responseDecodeData = await responseDecodeDataWithAes(encodedData, aes, iv);
+
+                        decodedData = JSON.parse(responseDecodeData);
+                    }
+
+                    func.migRemoveHtml(document.querySelector('.listTable'));
+
+                    const accountList = (decodedData && decodedData.data) ? decodedData.data : [];
+
+                    accounts.allItemCount = accountList.length;
+                    accounts.allAccountsData = accountList;
+
+                    if (accountList.length > 0) {
+                        sessionStorage.setItem('accountsData', 'Y');
+                        accounts.renderTable();
+                    } else {
+                        sessionStorage.setItem('accountsData', 'N');
+                        accounts.handleNoData("No Data.");
+                        accounts.listEvent();
+                    }
+
+                    sessionStorage.setItem('accountsCnt', accountList.length);
+
+                } catch (e) {
+                    accounts.listEvent();
+                    sessionStorage.setItem('accountsData', 'N');
+                    accounts.handleNoData("No Data.");
+                }
+            },
+
+            handleNoData(message) {
+                func.migRemoveHtml(document.querySelector('.listTable'));
+                var html = `<tr><td colspan="4">${message}</td></tr>`;
+                func.migAppendHtml(document.querySelector('.listTable'), html, 'tbody');
+                document.querySelector('.more').classList.toggle('on', false);
+            },
+
+            renderTable() {
+                const listTable = document.querySelector('.listTable');
+                func.migRemoveHtml(listTable);
+
+                const dataToRender = accounts.allAccountsData;
+                accounts.allItemCount = dataToRender.length;
+
+                if (accounts.allItemCount > 0) {
+                    const itemsToDraw = Math.min(accounts.allItemCount, accounts.limit);
+
+                    for (var i = 0; i < itemsToDraw; i++) {
+                        let originTime = dataToRender[i].metadata.created_time;
+                        let kstTime = '';
+                        try {
+                            const date = new Date(originTime);
+                            const options = {
+                                timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit',
+                                hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+                            };
+                            kstTime = date.toLocaleString('en-CA', options).replace(',', '');
+                        } catch (e) {
+                            kstTime = originTime.substr(0, 10) + " " + originTime.substr(11, 8);
+                        }
+
+                        var html = `<tr>
+                            <td class="left"><a href="javascript:;" data-name="${dataToRender[i].name}">${dataToRender[i].name}</a></td>
+                            <td>${dataToRender[i].data.storageType}</td>
+                            <td>${dataToRender[i].data.endpoint}</td>
+                            <td>${kstTime}</td>
+                        </tr>`;
+                        func.migAppendHtml(listTable, html, 'tbody');
+                    }
+                    if (listTable.querySelectorAll('tr').length < accounts.allItemCount) {
+                        document.querySelector('.more').classList.toggle('on', true);
+                    } else {
+                        document.querySelector('.more').classList.toggle('on', false);
+                    }
+                } else {
+                    accounts.handleNoData("No Data.");
+                }
+                accounts.listEvent();
+            },
+
+            listEvent() {
+                var listAll = document.querySelector('.listTable').querySelectorAll('a');
+
+                for (var i = 0; i <= listAll.length - 1; i++) {
+                    listAll[i].addEventListener('click', (e) => {
+                        sessionStorage.setItem('accountsName', e.target.getAttribute('data-name'));
+                        document.location.href = func.cpMigrationUiUri + URI_CP_ACCOUNTS_LIST + URI_CP_DETAILS;
+                    }, true);
+                }
+
+                const loadingEl = document.getElementById('loading');
+                if (loadingEl) loadingEl.remove();
+            },
+
+            event() {
+                document.querySelector('.create').addEventListener('click', (e) => {
+                    document.location.href = func.cpMigrationUiUri + URI_CP_ACCOUNTS_CREATE;
+                }, false);
+
+                document.querySelector('.more').addEventListener('click', (e) => {
+                    accounts.limit += 10;
+                    accounts.renderTable();
+                }, false);
+            },
+        }
+
+        async function responseDecodeDataWithAes(data, aes, iv) {
+            try {
+                return CryptoJS.AES.decrypt(data.toString(), CryptoJS.enc.Hex.parse(aes),
+                    {
+                        iv: CryptoJS.enc.Hex.parse(iv),
+                        padding: CryptoJS.pad.Pkcs7,
+                        mode: CryptoJS.mode.CBC
+                    }).toString(CryptoJS.enc.Utf8);
+            } catch (error) {
+                console.log("Decrypt Error")
+            }
+        }
+    </script>
+</th:block>
+</html>

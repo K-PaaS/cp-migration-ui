@@ -1,0 +1,94 @@
+spring:
+  application:
+    name: cp-portal-migration-ui
+  main:
+    allow-bean-definition-overriding: true
+    allow-circular-references: true
+  freemarker:
+    template-loader-path: classpath:/templates/
+  security:
+    oauth2:
+      client:
+        registration:
+          keycloak:
+            provider: keycloak
+            client-id: ${KEYCLOAK_CP_CLIENT_ID}
+            client-secret: ${KEYCLOAK_CP_CLIENT_SECRET}
+            authorization-grant-type: authorization_code
+            redirect-uri: ${CP_PORTAL_MIGRATION_UI_URI}/login/oauth2/code/keycloak
+            scope:
+        provider:
+          keycloak:
+            issuer-uri: ${KEYCLOAK_URI}/realms/${KEYCLOAK_CP_REALM}
+
+keycloak:
+  superAdminRole: cp-cluster-admin-role
+  oauth2LoginPath: /oauth2/authorization/keycloak
+  logoutUri: ${KEYCLOAK_URI}/realms/${KEYCLOAK_CP_REALM}/protocol/openid-connect/logout
+  introspectUri: ${KEYCLOAK_URI}/realms/${KEYCLOAK_CP_REALM}/protocol/openid-connect/token/introspect
+
+server:
+  port: ${PORT:8097}
+  servlet:
+    session:
+      cookie:
+        name: CPADMINPORTALSESSION
+    context-path: /cpmigui
+
+management:
+  security:
+    enabled: false
+  endpoints:
+    web:
+      exposure:
+        include: health
+
+logging:
+  config: classpath:logback-spring.xml
+
+key:
+  auth:
+    private: ${AUTH_PRIVATE_KEY}
+    public: ${AUTH_PUBLIC_KEY}
+    hmac: ${AUTH_HMAC_KEY}
+  migration:
+    private: ${MIG_PRIVATE_KEY}
+    public: ${MIG_PUBLIC_KEY}
+    hmac: ${MIG_HMAC_KEY}
+
+cp:
+  migration:
+    ui:
+      uri: ${CP_PORTAL_MIGRATION_UI_URI}
+---
+spring:
+  config:
+    activate:
+      on-profile: local
+
+logging:
+  file:
+    path: logs
+
+cpApi:
+  url: ${CP_PORTAL_API_URI}
+migrationApi:
+  url: ${CP_MIGRATION_API_URI}
+migrationAuth:
+  url: ${CP_MIGRATION_AUTH_URI}
+---
+spring:
+  config:
+    activate:
+      on-profile: prod
+
+logging:
+  file:
+    path: /home/1000/logs
+
+cpApi:
+  url: ${CP_PORTAL_API_URI}
+migrationApi:
+  url: ${CP_MIGRATION_API_URI}
+migrationAuth:
+  url: ${CP_MIGRATION_AUTH_URI}
